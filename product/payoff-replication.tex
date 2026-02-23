@@ -1,0 +1,48 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+
+\setlist[itemize]{noitemsep, topsep=2pt}
+\setlist[enumerate]{noitemsep, topsep=2pt}
+
+\title{TickRange Accrual Notes Replication}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+
+\section{Swaps}
+
+impliedOccupation time calculated from implied volatility
+
+realizedOccupationTime
+
+
+CFMM(RANGE_ACCRUAL_NOTE):
+	tradingFunction(payoff(RANGE_ACCRUAL_NOTE)):
+		rule: NoArbitrage: price(RANGE_ACCRUAL_NOTE) =  price(liquidityPosition(underlying))
+	      		   			       	     - price(futuresPerpetual(underlying))
+						       	     + price(Option(underlying)
+
+		rule NoArbitrage: price(RANGE_ACCRUAL_NOTE) =
+	     		  sum(discounted(price(Option(underlying),tickLower))
+			      - discounted(price(Option(underlying), tickUpper)))
+
+		invariant (tradingFunction):
+
+
+\section{References}
+
+- replicating markeet makers
+- replicatios monotonic payoffs without oracles
+
+\end{document}

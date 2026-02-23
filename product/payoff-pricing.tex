@@ -1,0 +1,62 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+
+\setlist[itemize]{noitemsep, topsep=2pt}
+\setlist[enumerate]{noitemsep, topsep=2pt}
+
+\title{TickRange Accrual Notes Pricing}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+
+\section{Pricing Models}
+
+\subsection{Model ...}
+
+\subsubsection{Assumptions}
+\subsubsection{Constrains}
+\subsubsection{Variables}
+- parameters
+- endogeneous
+- exogeneous
+
+
+Having a access to a risk-free rate (say a lending protocol oracle interest rate)
+
+Note that given \((\Delta_i)\), \(T\), \([\psi_b, \psi_a]\) And \(\Theta\):
+
+\begin{align*}
+  \Pi^{\texttt{TAN}} (T) &= \Theta \cdot \frac{\sum^N \mathbb{1}_{\psi_b \leq P(\Delta_i) \leq \psi_a}}{N} \\
+  \\
+  &= \frac{\Theta}{N}\cdot \sum \mathbb{1}_{P(\Delta_i) > \psi_b} - \sum \mathbb{1}_{P(\Delta_i) > \psi_a}
+\end{align*}
+
+The above decomposition is a series of digital call options (cash-or noting calls)
+
+
+Then considering a period tick accrual policy (times when tick accrual can accumulate coupons)
+\(0 \leq T_1 \leq \cdots \leq T_N = T\). Then using the martinagle argument, we have:
+
+\begin{align*}
+  P_{\Pi^{\text{TAN}}} (0, T) = \e^{-rT} \frac{\Theta}{N}\cdot \sum^N \e^{r\cdot T_i} \big ( P_{Pi^D} (0, T_i, \psi_b) - P_{\Pi^{D}} (0, T_i , \psi_a)\big)
+
+\end{align*}
+
+\subsection{Calibration}
+\subsection{Empirical Analysis}
+\section{References}
+
+- cite the Range Accrual Strucutred NOTes by the Bulgarian thesis
+
+\end{document}
