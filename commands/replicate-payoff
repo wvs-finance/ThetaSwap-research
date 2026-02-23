@@ -1,0 +1,12 @@
+# Replicate Payoff
+
+- requires product/payoff-pricing.tex, product/payoff-spec.tex, product/payoff-specification.tex
+- Have the user define
+
+```
+      \begin{itemize}
+         \item constrains (define-constrains)
+         \item assumptions (define-assumptions)
+         \item variables --> endogenous and exogenous (define-variables)
+      \end{itemize}
+```

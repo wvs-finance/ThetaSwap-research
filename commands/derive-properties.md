@@ -1,0 +1,12 @@
+# Payoff Properties \n
+
+- Derive instrument contract payoff properties /n
+-This requires product/payoff-spec.tex and product/payoff-structure.tex \n
+
+- There are two properties. Have the user define both.
+
+      \begin{itemize}
+          \item analytical (path-dependance, greeks, continuity, differentiablity, etc) (/analytical)
+          \item geometrical  (/geometrical)
+      \end{itemize}
+

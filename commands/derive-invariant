@@ -1,0 +1,13 @@
+# Constant Function Market Maker (CFMM)
+
+- requires product/payoff-pricing.tex, product/payoff-spec.tex, product/payoff-specification.tex, product/payoff-replication.tex
+
+Have the user define
+
+> Geometry of constant function market makers
+
+      \begin{itemize}
+					         \item constrains (define-constrains)
+         \item assumptions (define-constrains)
+         \item variables --> endogenous and exogenous
+      \end{itemize}
