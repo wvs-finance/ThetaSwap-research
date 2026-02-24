@@ -22,6 +22,8 @@
 
 \section{Swaps}
 
+
+\subsection{Occupation Time}
 impliedOccupation time calculated from implied volatility
 
 realizedOccupationTime
@@ -29,8 +31,8 @@ realizedOccupationTime
 
 CFMM(RANGE_ACCRUAL_NOTE):
 	tradingFunction(payoff(RANGE_ACCRUAL_NOTE)):
-		rule: NoArbitrage: price(RANGE_ACCRUAL_NOTE) =  price(liquidityPosition(underlying))
-	      		   			       	     - price(futuresPerpetual(underlying))
+	rule: NoArbitrage: price(RANGE_ACCRUAL_NOTE) =  price(liquidityPosition(underlying))
+        - price(futuresPerpetual(underlying))
 						       	     + price(Option(underlying)
 
 		rule NoArbitrage: price(RANGE_ACCRUAL_NOTE) =
@@ -40,9 +42,44 @@ CFMM(RANGE_ACCRUAL_NOTE):
 		invariant (tradingFunction):
 
 
+
+\subsection{Applications}
+
+Consider a liquidity provider who wishes to hedge against volatility for his current liquidity position. With range structured notes, we can do that  the following way:
+
+The LP is    feeGrowthInside -      feeGrowthOutside
+                 [il, iu]        (i_min, i_u) U (i_u, i_max)              
+
+
+                 The LP has access to  hitorical trading volume data and is currently located on the optimal range that captures most of the volume: [i_l*,i*_u] = [il,iu]. The LP is long theta, However:
+
+                 - A tail risk often not consider and priced is the risk induced by how the volatility of the underlying shapes expected time inside the position. This is a risk that can be captured with TAN and thus, aa TAN can be used to hedge such risk
+
+                 - Another risk is the PLP adversion to JIT liquidity. We show that a TAN can  be used by PLP to hedge against the JIT rent-extraction risk induced by
+
+
+                 
+\subsubsection{HEDGING JIT}
+- Micrstructure context:
+
+\partial cosOfLiquidity / \partial feeRevenueAllocatioRule 
+
+Iff feeRevenueAllocationRule := \propto unitOfLiquidity (proRata AllocationRule) ==> 
+                                                                 |
+                                                                 |
+                                                             (competition)
+                                                                 |
+                                                       (larger share of feeRevenue/tick)
+                                                                 |
+                      larger unitOfLiquidity/tick          <-------   
+                                 |
+                                 |
+                                 v
+                         (excess liquidity)
+                      
 \section{References}
 
-- replicating markeet makers
+- replicating market makers
 - replicatios monotonic payoffs without oracles
 
 \end{document}

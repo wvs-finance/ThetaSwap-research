@@ -1,0 +1,112 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+
+\setlist[itemize]{noitemsep, topsep=2pt}
+\setlist[enumerate]{noitemsep, topsep=2pt}
+
+\title{TickRange Accrual Notes Specification}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+ 
+RANGE-ACCRUAL-NOTE::
+	underlying: feeGrowthInside(liquidityPosition);
+	strikeInterval: TickRange;
+	coupon(period):  inStrikeInterval(price(swap)) ? fee*swap : 0x00;  
+	observationPeriods: <NUMBER_OF_BLOCKS>, <...>
+	accrualFrequency: <2 BLOCKS>, <N BLOCKS>, ..., <TIME_FREQUENCY>
+	payoff(RANGE_ACCRUAL_NOTES) -> feeGrowthInside
+
+
+        RANGE-ACCRUAL-NOTE::BOND
+
+        BOND::
+	   principal: 
+
+ \subsection{Requirements}
+
+R1: Accrues cupon in each period (Already fullfilled by Uniswap design)
+R2: Pays out the coupon at the end of the block (Start of the new block)
+R3: strikeInterval can be changed
+R4: The accrued cupon can change across periods (Dynamic Fees)
+R5: entitles the holder to coupon payments
+R6: entitles the holder the payment of the principal
+R7: calculates the payoff requireing the whole trajectory of the underlying price
+ \subsection{Examples}
+ \subsubsection{ 6 block wsETTH/WBTC feeGrowth}
+....
+
+ \subsection{Single-Period}
+
+ label the instrument \texttt{TAN}.
+
+ Let \(\Theta = \int_{\psi} \phi (\Delta (\psi)) d\psi\) be the representative LP position (\text{feeGrowthInside})
+
+ We define a observationPeriods \(N\) can be modeled as number of blocks, number of transactions, or even time related (but discrete)
+
+ Compared to Range Accrual notes \(\Theta\) will be the equivalent to the \textbf{coupons}.
+
+ Given a sequence of \(n\) swaps \(\Delta_i\)_{i=1}^n that happened within the observationPeriod \(N\)
+ which realized exhange rate induced sequence is \(P (\Delta_i)\) we define the \textbf{singe-period} tick range accrual payoff as:
+
+ \begin{align*}
+   \Pi^{\texttt{TAN}} = \Theta \cdot \frac{\sum^n \mathbb{1}_{ \psi_b \leq P(\Delta_i) \leq \psi_a}}{N}
+ \end{align*}
+
+
+ 
+ \subsection{Multi-Period}
+
+ Given \(N =(N_j)^d\) then:
+
+ \begin{align*}
+     \Pi^{\texttt{TAN}} = \sum^j \Theta_j \cdot \frac{\sum_j \sum_i \mathbb{1}_{ \psi_b \leq P(\Delta_{ij}) \leq \psi_a}}{N_j} 
+  \end{align*}
+
+
+ 
+ \section{Extensions}
+
+Extensions(RANGE_ACCRUAL_NOTE)::
+	Accrual_Decrual(RANGE_ACCRUAL_NOTE) -> RANGE_ACCRUAL_NOTE
+		updateAccrualFrequency(RANGE_ACCRUAL_NOTE, Frequency)
+	rule: price(Accrual_Decrual(RANGE_ACCRUAL_NOTE) < price(RANGE_ACCRUAL_NOTE);
+	
+	TargetRedemptionNote(RANGE_ACCRUAL_NOTE) -> RANGE_ACCRUAL_NOTE
+		setRedemptionTargetCap(RANGE_ACCRUAL_NOTE, Cap)
+
+	Barriers(RANGE_ACCRUAL_NOTE) -> RANGE_ACCRUAL_NOTE
+		setKnockInBarrier(RANGE_ACCRUAL_NOTE, Barrier)
+		setKnockOutBarrier(RANGE_ACCRUAL_NOTE, Barrier)
+
+	rule: price(Barriers(RANGE_ACCRUAL_NOTE)) < price(RANGE_ACCRUAL_NOTE)
+
+	Callable(RANGE_ACCRUAL_NOTE) -> Option(RANGE_ACCRUAL_NOTE)
+		mint(
+			OptionType(Option(RANGE_ACCRUAL_NOTE))= CALL,
+			OptionPosition(Option(RANGE_ACCRUAL_NOTE)) = SHORT
+			strikePrice(Option(RANGE_ACCRUAL_NOTE))
+		)
+	 rule: price(Callable(RANGE_ACCRUAL_NOTE)) < price(RANGE_ACCRUAL_NOTE)
+	 rule: Automatically repaid to the holder if certain conditions are met
+
+	 BasketUnderlier(RANGE_ACCRUAL_NOTE) -> RANGE_ACCRUAL_NOTE
+	 	updateUnderlying(RANGE_ACCRUAL_NOTE, MultiAssetVault (IERC7575))
+
+	FloatingRangeAccrual(RANGE_ACCRUAL_NOTE) -> RANGE_ACCRUAL_NOTE
+		updateCouponRule(RANGE_ACCRUAL_NOTE, TradingFeePolicy)
+
+
+
+\end{document}

@@ -1,0 +1,24 @@
+# Requirements
+
+- structural econometrics --> CFMM implementation
+
+
+## [MACRA24](../refs/ma_cost_permissionless_2024.pdf)
+
+- FeeRevenueAllocationRule(CFMM) = <PRO-RATA> ==> LPing competes for feeRevenue ==> Liquidity above pareto frontier ==> Less Technical Efficient (Capital Efficient)
+
+This is a claim   that needs validation and is accompanied by:
+
+
+(1)     \partial \sum L_i      / \partial numberOfLPs  > 0
+         totalLiquidity
+          on a tickRange
+
+
+	  \partial \pi^i       / \partial numberOfLPs < 0
+(2)         per-capita
+            LP profit
+
+
+(1) ^ (2) ==>  \partial \pi^i    / \partial \sum L_i < 0
+
