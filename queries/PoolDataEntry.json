@@ -1,0 +1,7 @@
+{
+  "PoolDataEntry._fetch_lifetime": "query GetPool($id: ID!) { pool(id: $id) { createdAtTimestamp } }",
+  "PoolDataEntry.activePositions": "query GetModifyLiquidity($pool: String!) { modifyLiquiditys(where: { pool: $pool }, orderBy: timestamp, orderDirection: asc) { timestamp amount } }",
+  "PoolDataEntry.volumeUSD": "query GetSwaps($pool: String!) { swaps(where: { pool: $pool }, orderBy: timestamp, orderDirection: asc) { timestamp amountUSD } }",
+  "PoolDataEntry.priceUSD": "query GetSwaps($pool: String!) { swaps(where: { pool: $pool }, orderBy: timestamp, orderDirection: asc) { timestamp sqrtPriceX96 } }",
+  "PoolDataEntry.tvlUSD": "query GetPool($id: ID!) { pool(id: $id) { totalValueLockedUSD } }"
+}
