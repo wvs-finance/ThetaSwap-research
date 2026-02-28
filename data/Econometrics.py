@@ -4,6 +4,7 @@ from typing import Dict, Optional, Union
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.statespace.structural import UnobservedComponents
+import statsmodels.api as sm
 
 TimeSeries = pd.Series
 Exogenous = Union[pd.Series, pd.DataFrame]
@@ -184,4 +185,36 @@ class LiquidityStateModel:
             _rho=float(np.median(rhos)),
             _state=pd.concat(state_pieces),
             _result={"betas": all_betas, "rhos": rhos, "n_windows": len(rhos)}
+        )
+
+
+class AdverseCompetitionModel:
+    def __call__(
+        self,
+        fee_yield: TimeSeries,
+        lvr_proxy: TimeSeries,
+        congestion: TimeSeries
+    ) -> AdverseCompetition:
+        combined = pd.DataFrame({
+            "fee_yield": fee_yield,
+            "lvr_proxy": lvr_proxy,
+            "congestion": congestion
+        }).dropna()
+        mask = combined.apply(np.isfinite).all(axis=1)
+        clean = combined[mask]
+
+        # Step 2a: fee_yield ~ lvr_proxy → extract η_t
+        X_lvr = sm.add_constant(clean["lvr_proxy"])
+        res_lvr = sm.OLS(clean["fee_yield"], X_lvr).fit()
+        eta = pd.Series(res_lvr.resid, index=clean.index)
+
+        # Step 2b: η_t ~ ΔI_t with HC1 robust SEs
+        X_cong = sm.add_constant(clean["congestion"])
+        res_cong = sm.OLS(eta, X_cong).fit(cov_type="HC1")
+        delta = float(res_cong.params.iloc[1])
+
+        return AdverseCompetition(
+            _delta=delta,
+            _residual=eta,
+            _result=res_cong
         )

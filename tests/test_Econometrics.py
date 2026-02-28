@@ -200,13 +200,13 @@ class TestAdverseCompetition(unittest.TestCase):
     """Test adverse competition hypothesis — Stage 2 of two-stage estimation.
 
     Stage 1: ΔI_t extracted by LiquidityStateModel (congestion index)
-    Stage 2a: fee_yield ~ volume_ratio → η_t (fee yield orthogonal to LVR)
+    Stage 2a: Δfee_yield ~ |ΔP/P| → η_t (fee yield change orthogonal to LVR)
     Stage 2b: η_t ~ ΔI_t → δ₂ (adverse competition impact)
 
     Hypothesis:
     - δ₂ < 0: congestion reduces fee capture quality (adverse competition)
     - p < 0.05: statistically significant
-    - corr(η_t, volume/TVL) ≈ 0: residual is orthogonal to LVR
+    - corr(η_t, |ΔP/P|) ≈ 0: residual is orthogonal to LVR
     """
 
     @classmethod
@@ -221,12 +221,12 @@ class TestAdverseCompetition(unittest.TestCase):
         ls = LiquidityStateModel()(endog=endog, exog=exog)
 
         # Stage 2: adverse competition impact
-        cls.fee_yield = div(feesUSD(cls.pool_data), tvlUSD(cls.pool_data))
-        cls.volume_ratio = div(volumeUSD(cls.pool_data), tvlUSD(cls.pool_data))
+        cls.fee_yield_change = delta(div(feesUSD(cls.pool_data), tvlUSD(cls.pool_data)))
+        cls.lvr_proxy = div(delta(priceUSD(cls.pool_data)), lagged(priceUSD(cls.pool_data))).abs()
         cls.congestion = state(ls)
         cls.ac = AdverseCompetitionModel()(
-            fee_yield=cls.fee_yield,
-            volume_ratio=cls.volume_ratio,
+            fee_yield=cls.fee_yield_change,
+            lvr_proxy=cls.lvr_proxy,
             congestion=cls.congestion
         )
 
@@ -234,25 +234,24 @@ class TestAdverseCompetition(unittest.TestCase):
         self.assertIsInstance(self.ac, AdverseCompetition)
 
     def test_delta_negative(self):
-        """δ₂ < 0: congestion reduces fee capture beyond what volume explains"""
+        """δ₂ < 0: congestion reduces fee capture beyond what LVR explains"""
         self.assertLess(delta_coeff(self.ac), 0,
             f"Expected δ₂ < 0 (adverse competition), got δ₂ = {delta_coeff(self.ac):.6f}")
 
     def test_delta_significant(self):
         """δ₂ significant at p < 0.05"""
         res = ols_result(self.ac)
-        pval = res.pvalues.iloc[1]  # second coefficient is δ₂ (first is constant)
+        pval = res.pvalues.iloc[1]
         self.assertLess(pval, 0.05,
             f"Expected p < 0.05 for δ₂, got p = {pval:.4f}")
 
-    def test_residual_orthogonal_to_volume(self):
-        """η_t is orthogonal to volume/TVL by construction"""
+    def test_residual_orthogonal_to_lvr(self):
+        """η_t is orthogonal to |ΔP/P| by OLS construction"""
         eta = residual(self.ac)
-        # Align indices
-        common = eta.index.intersection(self.volume_ratio.index)
-        corr = eta.loc[common].corr(self.volume_ratio.loc[common])
+        common = eta.index.intersection(self.lvr_proxy.index)
+        corr = eta.loc[common].corr(self.lvr_proxy.loc[common])
         self.assertAlmostEqual(corr, 0, delta=0.05,
-            msg=f"Expected corr(η_t, volume/TVL) ≈ 0, got {corr:.4f}")
+            msg=f"Expected corr(η_t, |ΔP/P|) ≈ 0, got {corr:.4f}")
 
 
 if __name__ == "__main__":
