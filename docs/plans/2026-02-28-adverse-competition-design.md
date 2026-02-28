@@ -29,31 +29,36 @@ e_t = γe_{t-1} + v_t
 
 ### Stage 2: Adverse competition impact (new — `AdverseCompetitionModel`)
 
-**Step 2a — Residualize fee yield on volume (strip LVR-correlated component):**
+**Step 2a — Residualize fee yield change on |ΔP/P| (strip LVR-correlated component):**
 
 ```
-fee_yield_t = α + δ₁(volume_t/TVL_t) + η_t
+Δfee_yield_t = α + δ₁·|ΔP_t/P_{t-1}| + η_t
 ```
 
-- fee_yield_t = feesUSD_t / tvlUSD_t
-- volume_t/TVL_t is the LVR-correlated driver of fee income
-- η_t = fee yield unexplained by volume — orthogonal to LVR by construction
+- Δfee_yield_t = Δ(feesUSD_t / tvlUSD_t) — fee yield *change*
+- |ΔP/P| is the direct LVR proxy (price volatility drives arbitrage volume)
+- η_t = fee yield change unexplained by LVR — orthogonal by construction
 
-**Step 2b — Test congestion impact on residual fee yield:**
+**Note:** The original design used volume/TVL as regressor, but fee_yield = fee_rate × volume/TVL
+identically in Uniswap V3 (R² = 1.000), making the residual degenerate.
+|ΔP/P| is correlated with volume through arbitrage but not deterministically equal.
+
+**Step 2b — Test congestion impact on residual fee yield change:**
 
 ```
 η_t = μ + δ₂·ΔI_t + ε_t
 ```
 
 - **Success criterion: δ₂ < 0 and p < 0.05**
-- δ₂ < 0 means: when congestion rises, fee income drops beyond what volume explains
+- δ₂ < 0 means: when congestion rises, fee yield drops beyond what LVR explains
 - This is the adverse competition risk premium — pure LP-vs-LP effect
+- **Result: δ₂ = -0.002, p = 0.0002 (z = -3.74)**
 
 ## Why Orthogonal to LVR
 
 - Stage 1 strips ΔP/P from liquidity changes → ΔI_t is orthogonal to price movement
-- Stage 2a strips volume/TVL from fee yield → η_t is orthogonal to volume-driven fees
-- LVR depends on price movement and volume. Both are removed.
+- Stage 2a strips |ΔP/P| from fee yield changes → η_t is orthogonal to LVR-driven fees
+- LVR depends on price movement. Price movement is removed from both sides.
 - What remains: the pure effect of LP repositioning (ΔI_t) on fee capture quality (η_t)
 
 ## Components
@@ -82,14 +87,14 @@ def ols_result(ac: AdverseCompetition) -> object
 class AdverseCompetitionModel:
     def __call__(
         self,
-        fee_yield: TimeSeries,      # feesUSD / tvlUSD
-        volume_ratio: TimeSeries,   # volumeUSD / tvlUSD
+        fee_yield: TimeSeries,      # Δ(feesUSD / tvlUSD)
+        lvr_proxy: TimeSeries,      # |ΔP/P| — LVR proxy
         congestion: TimeSeries      # ΔI_t from Stage 1
     ) -> AdverseCompetition
 ```
 
 Internally:
-1. OLS: fee_yield ~ volume_ratio → extract η_t
+1. OLS: fee_yield ~ lvr_proxy → extract η_t
 2. OLS with HC1 robust SEs: η_t ~ ΔI_t → extract δ₂
 3. Return frozen AdverseCompetition
 
@@ -108,9 +113,9 @@ exog = market_state(pool_data)
 ls = LiquidityStateModel()(endog=endog, exog=exog)
 
 # Stage 2
-fy = div(feesUSD(pool_data), tvlUSD(pool_data))
-vr = div(volumeUSD(pool_data), tvlUSD(pool_data))
-ac = AdverseCompetitionModel()(fee_yield=fy, volume_ratio=vr, congestion=state(ls))
+fy = delta(div(feesUSD(pool_data), tvlUSD(pool_data)))
+lvr = div(delta(priceUSD(pool_data)), lagged(priceUSD(pool_data))).abs()
+ac = AdverseCompetitionModel()(fee_yield=fy, lvr_proxy=lvr, congestion=state(ls))
 
 delta_coeff(ac)  # δ₂ < 0 ?
 ```
@@ -126,7 +131,7 @@ delta_coeff(ac)  # δ₂ < 0 ?
 ### TestAdverseCompetition (real V3 USDC/WETH data)
 - `test_delta_negative` — δ₂ < 0
 - `test_delta_significant` — p < 0.05
-- `test_residual_orthogonal_to_volume` — corr(η_t, volume/TVL) ≈ 0
+- `test_residual_orthogonal_to_lvr` — corr(η_t, |ΔP/P|) ≈ 0
 
 ## Data
 
