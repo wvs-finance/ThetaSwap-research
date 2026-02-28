@@ -1,22 +1,23 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional, Union
 
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.statespace.structural import UnobservedComponents
 
 TimeSeries = pd.Series
+Exogenous = Union[pd.Series, pd.DataFrame]
 
 
 @dataclass(frozen=True)
 class LiquidityState:
-    _beta: float
+    _beta: Dict[str, float]
     _rho: float
     _state: TimeSeries
     _result: object
 
 
-def beta(ls: LiquidityState) -> float:
+def beta(ls: LiquidityState) -> Dict[str, float]:
     return ls._beta
 
 
@@ -36,7 +37,7 @@ class LiquidityStateModel:
     def __call__(
         self,
         endog: TimeSeries,
-        exog: TimeSeries,
+        exog: Exogenous,
         ar: Optional[int] = 1,
         window: Optional[int] = None
     ) -> LiquidityState:
@@ -45,25 +46,52 @@ class LiquidityStateModel:
         return self._fit_rolling(endog, exog, ar, window)
 
     @staticmethod
-    def _standardize(series: TimeSeries):
+    def _standardize_series(series: TimeSeries):
         mu = series.mean()
         sigma = series.std()
         if sigma == 0:
             return series - mu, mu, sigma
         return (series - mu) / sigma, mu, sigma
 
+    @staticmethod
+    def _standardize_exog(exog: Exogenous):
+        if isinstance(exog, pd.DataFrame):
+            return (exog - exog.mean()) / exog.std()
+        return (exog - exog.mean()) / exog.std()
+
+    @staticmethod
+    def _finite_mask(endog: TimeSeries, exog: Exogenous) -> pd.Series:
+        endog_ok = np.isfinite(endog)
+        if isinstance(exog, pd.DataFrame):
+            exog_ok = exog.apply(np.isfinite).all(axis=1)
+        else:
+            exog_ok = np.isfinite(exog)
+        return endog_ok & exog_ok
+
+    @staticmethod
+    def _extract_betas(res) -> Dict[str, float]:
+        param_names = list(res.params.index)
+        beta_keys = [k for k in param_names if "beta" in k.lower() or "x1" in k.lower()]
+        return {k: float(res.params[k]) for k in beta_keys}
+
+    @staticmethod
+    def _extract_rho(res) -> float:
+        param_names = list(res.params.index)
+        rho_key = [k for k in param_names if "ar" in k.lower()][0]
+        return float(res.params[rho_key])
+
     def _fit_full(
         self,
         endog: TimeSeries,
-        exog: TimeSeries,
+        exog: Exogenous,
         ar: int
     ) -> LiquidityState:
-        mask = np.isfinite(endog) & np.isfinite(exog)
+        mask = self._finite_mask(endog, exog)
         endog_clean = endog[mask]
         exog_clean = exog[mask]
 
-        endog_z, endog_mu, endog_sigma = self._standardize(endog_clean)
-        exog_z, _, _ = self._standardize(exog_clean)
+        endog_z, endog_mu, endog_sigma = self._standardize_series(endog_clean)
+        exog_z = self._standardize_exog(exog_clean)
 
         model = UnobservedComponents(
             endog_z,
@@ -72,16 +100,12 @@ class LiquidityStateModel:
         )
         results = model.fit(disp=False)
 
-        param_names = list(results.params.index)
-        beta_key = [k for k in param_names if "beta" in k.lower() or "x1" in k.lower()][0]
-        rho_key = [k for k in param_names if "ar" in k.lower()][0]
-
         smoothed_z = pd.Series(results.smoothed_state[0], index=endog_clean.index)
         smoothed = smoothed_z * endog_sigma + endog_mu if endog_sigma > 0 else smoothed_z
 
         return LiquidityState(
-            _beta=float(results.params[beta_key]),
-            _rho=float(results.params[rho_key]),
+            _beta=self._extract_betas(results),
+            _rho=self._extract_rho(results),
             _state=smoothed,
             _result=results
         )
@@ -89,16 +113,16 @@ class LiquidityStateModel:
     def _fit_rolling(
         self,
         endog: TimeSeries,
-        exog: TimeSeries,
+        exog: Exogenous,
         ar: int,
         window: int
     ) -> LiquidityState:
-        mask = np.isfinite(endog) & np.isfinite(exog)
+        mask = self._finite_mask(endog, exog)
         endog_clean = endog[mask]
         exog_clean = exog[mask]
 
         n = len(endog_clean)
-        betas = []
+        all_betas = []
         rhos = []
         state_pieces = []
 
@@ -111,8 +135,8 @@ class LiquidityStateModel:
                 continue
 
             try:
-                e_z, e_mu, e_sigma = self._standardize(e_win)
-                x_z, _, _ = self._standardize(x_win)
+                e_z, e_mu, e_sigma = self._standardize_series(e_win)
+                x_z = self._standardize_exog(x_win)
 
                 model = UnobservedComponents(
                     e_z,
@@ -121,12 +145,8 @@ class LiquidityStateModel:
                 )
                 res = model.fit(disp=False)
 
-                param_names = list(res.params.index)
-                beta_key = [k for k in param_names if "beta" in k.lower() or "x1" in k.lower()][0]
-                rho_key = [k for k in param_names if "ar" in k.lower()][0]
-
-                betas.append(float(res.params[beta_key]))
-                rhos.append(float(res.params[rho_key]))
+                all_betas.append(self._extract_betas(res))
+                rhos.append(self._extract_rho(res))
 
                 smoothed_z = pd.Series(res.smoothed_state[0], index=e_win.index)
                 smoothed = smoothed_z * e_sigma + e_mu if e_sigma > 0 else smoothed_z
@@ -134,12 +154,15 @@ class LiquidityStateModel:
             except Exception:
                 continue
 
-        if not betas:
+        if not rhos:
             raise ValueError(f"No windows of size {window} could be estimated from {n} observations")
 
+        beta_keys = all_betas[0].keys()
+        median_betas = {k: float(np.median([b[k] for b in all_betas])) for k in beta_keys}
+
         return LiquidityState(
-            _beta=float(np.median(betas)),
+            _beta=median_betas,
             _rho=float(np.median(rhos)),
             _state=pd.concat(state_pieces),
-            _result={"betas": betas, "rhos": rhos, "n_windows": len(betas)}
+            _result={"betas": all_betas, "rhos": rhos, "n_windows": len(rhos)}
         )

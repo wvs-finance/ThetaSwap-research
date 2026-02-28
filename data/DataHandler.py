@@ -1,5 +1,6 @@
 
 from data.V4Client import V4Subgraph
+from data.UniswapClient import UniswapClient
 import json
 import os
 from typing import Dict, Any, List, Optional, Tuple, Callable
@@ -32,16 +33,18 @@ class PoolEntryData:
     def __init__(
         self,
         pool_id: PoolId,
-        v4: Optional[V4Subgraph] = None
+        v4: Optional[V4Subgraph] = None,
+        client: Optional[UniswapClient] = None
     ) -> None:
         """
         Initialize PoolEntryData.
 
         Args:
             pool_id: The pool contract address or ID
-            v4: Optional V4Subgraph client (injected for testability)
+            v4: Optional V4Subgraph client (backward compat)
+            client: Optional UniswapClient (preferred — works with v3 or v4)
         """
-        object.__setattr__(self, "v4", v4 or V4Subgraph())
+        object.__setattr__(self, "v4", client or v4 or V4Subgraph())
         object.__setattr__(self, "pool_id", pool_id)
         query_path = os.path.join(os.path.dirname(__file__), "..", "queries", "PoolDataEntry.json")
         object.__setattr__(self, "_PoolEntryData__query_path", query_path)
@@ -83,22 +86,6 @@ class PoolEntryData:
         endDate: Timestamp = int(dt.datetime.now().timestamp())
         return self.__toTimeRange(createdAt, endDate)
 
-    def activePositions(self) -> TimeSeries:
-        """Get active positions time series."""
-        pass
-
-    def volumeUSD(self) -> TimeSeries:
-        """Get USD volume time series."""
-        pass
-
-    def priceUSD(self) -> TimeSeries:
-        """Get USD price time series."""
-        pass
-
-    def tvlUSD(self) -> TimeSeries:
-        """Get USD TVL time series."""
-        pass
-
     def __loadQueries(self, sig: str) -> QueryParams:
         """Load query from JSON by method signature."""
         with open(self._PoolEntryData__query_path, "r") as f:
@@ -123,14 +110,7 @@ class PoolEntryData:
              "token0Price": float(day.get("token0Price") or 0),
              "token1Price": float(day.get("token1Price") or 0),
              "sqrtPrice": float(day.get("sqrtPrice") or 0),
-             "txCount": int(day.get("txCount") or 0),
-             "open": float(day.get("open") or 0),
-             "high": float(day.get("high") or 0),
-             "low": float(day.get("low") or 0),
-             "close": float(day.get("close") or 0),
-             "pool_lpCount": int(day.get("pool", {}).get("liquidityProviderCount") or 0),
-             "pool_txCount": int(day.get("pool", {}).get("txCount") or 0),
-             "pool_collectedFeesUSD": float(day.get("pool", {}).get("collectedFeesUSD") or 0)
+             "txCount": int(day.get("txCount") or 0)
          }
          df = pd.DataFrame([to_row(day) for day in data]).set_index("date")
 
@@ -147,5 +127,72 @@ class PoolEntryData:
         pass
 
         
+def volumeUSD(poolData:pd.DataFrame) -> TimeSeries:
+    """
+    Get USD volume time series.
+    It must return the volumeUSD column only
+    """    
+    return poolData["volumeUSD"]
+
+def priceUSD(poolData:pd.DataFrame) -> TimeSeries:
+    """Get USD price time series."""
+    return poolData["token0Price"]
+
+def tvlUSD(poolData:pd.DataFrame) -> TimeSeries:
+    """Get USD TVL time series."""
+    return poolData["tvlUSD"]
+
+def delta(series:TimeSeries) -> TimeSeries:
+    diff = series.diff()
+    return diff.fillna({diff.index[0]: series.mean()})
+
+
+def div(numerator: TimeSeries, denominator: TimeSeries) -> TimeSeries:
+    return numerator/ denominator
+
+def forward(series: TimeSeries) -> TimeSeries:
+    return series.shift(-1)
+
+def lagged(series: TimeSeries) -> TimeSeries:
+    return series.shift(1)
+
+def txCount(poolData: pd.DataFrame) -> TimeSeries:
+    return poolData["txCount"]
+
+
+def feesUSD(poolData: pd.DataFrame) -> TimeSeries:
+    return poolData["feesUSD"]
+
+
+def normalize(series: TimeSeries, window: int = 30) -> TimeSeries:
+    return series / series.rolling(window).mean()
+
+
+def variance(series: TimeSeries, libraryPointer:Optional[str]) -> TimeSeries:
+    strategy = VarianceStrategy()
+    return strategy(series,libraryPointer)
+
+class VarianceStrategy:
+    """Strategy pattern for variance calculation."""
     
+    def __call__(self, series: TimeSeries, libraryPointer: Optional[str] = None) -> TimeSeries:
+        """
+        Calculate cumulative variance at each timestamp.
         
+        Args:
+            series: Input time series
+            libraryPointer: Library to use ("numpy", "pandas", or None for default)
+            
+        Returns:
+            TimeSeries with cumulative variance at each timestamp
+        """
+        if libraryPointer is None or libraryPointer == "pandas":
+            return series.expanding().var()
+        elif libraryPointer == "numpy":
+            import numpy as np
+            return pd.Series([np.var(series.iloc[:i+1].values) for i in range(len(series))], 
+                           index=series.index)
+        else:
+            return series.expanding().var()
+
+ 
