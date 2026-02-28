@@ -33,6 +33,25 @@ def result(ls: LiquidityState) -> object:
     return ls._result
 
 
+@dataclass(frozen=True)
+class AdverseCompetition:
+    _delta: float
+    _residual: TimeSeries
+    _result: object
+
+
+def delta_coeff(ac: AdverseCompetition) -> float:
+    return ac._delta
+
+
+def residual(ac: AdverseCompetition) -> TimeSeries:
+    return ac._residual
+
+
+def ols_result(ac: AdverseCompetition) -> object:
+    return ac._result
+
+
 class LiquidityStateModel:
     def __call__(
         self,
