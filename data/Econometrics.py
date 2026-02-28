@@ -44,6 +44,14 @@ class LiquidityStateModel:
             return self._fit_full(endog, exog, ar)
         return self._fit_rolling(endog, exog, ar, window)
 
+    @staticmethod
+    def _standardize(series: TimeSeries):
+        mu = series.mean()
+        sigma = series.std()
+        if sigma == 0:
+            return series - mu, mu, sigma
+        return (series - mu) / sigma, mu, sigma
+
     def _fit_full(
         self,
         endog: TimeSeries,
@@ -54,9 +62,12 @@ class LiquidityStateModel:
         endog_clean = endog[mask]
         exog_clean = exog[mask]
 
+        endog_z, endog_mu, endog_sigma = self._standardize(endog_clean)
+        exog_z, _, _ = self._standardize(exog_clean)
+
         model = UnobservedComponents(
-            endog_clean,
-            exog=exog_clean,
+            endog_z,
+            exog=exog_z,
             autoregressive=ar
         )
         results = model.fit(disp=False)
@@ -65,10 +76,13 @@ class LiquidityStateModel:
         beta_key = [k for k in param_names if "beta" in k.lower() or "x1" in k.lower()][0]
         rho_key = [k for k in param_names if "ar" in k.lower()][0]
 
+        smoothed_z = pd.Series(results.smoothed_state[0], index=endog_clean.index)
+        smoothed = smoothed_z * endog_sigma + endog_mu if endog_sigma > 0 else smoothed_z
+
         return LiquidityState(
             _beta=float(results.params[beta_key]),
             _rho=float(results.params[rho_key]),
-            _state=pd.Series(results.smoothed_state[0], index=endog_clean.index),
+            _state=smoothed,
             _result=results
         )
 
@@ -97,9 +111,12 @@ class LiquidityStateModel:
                 continue
 
             try:
+                e_z, e_mu, e_sigma = self._standardize(e_win)
+                x_z, _, _ = self._standardize(x_win)
+
                 model = UnobservedComponents(
-                    e_win,
-                    exog=x_win,
+                    e_z,
+                    exog=x_z,
                     autoregressive=ar
                 )
                 res = model.fit(disp=False)
@@ -110,7 +127,10 @@ class LiquidityStateModel:
 
                 betas.append(float(res.params[beta_key]))
                 rhos.append(float(res.params[rho_key]))
-                state_pieces.append(pd.Series(res.smoothed_state[0], index=e_win.index))
+
+                smoothed_z = pd.Series(res.smoothed_state[0], index=e_win.index)
+                smoothed = smoothed_z * e_sigma + e_mu if e_sigma > 0 else smoothed_z
+                state_pieces.append(smoothed)
             except Exception:
                 continue
 

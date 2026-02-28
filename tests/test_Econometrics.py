@@ -111,7 +111,7 @@ class TestLiquidityStateModelEconomics(unittest.TestCase):
         cls.pool_data = pool(90)
         cls.endog = div(delta(tvlUSD(cls.pool_data)), lagged(tvlUSD(cls.pool_data)))
         cls.exog = variance(div(delta(priceUSD(cls.pool_data)), lagged(priceUSD(cls.pool_data))), None)
-        cls.ls = LiquidityStateModel()(endog=cls.endog, exog=cls.exog, window=30)
+        cls.ls = LiquidityStateModel()(endog=cls.endog, exog=cls.exog)
 
     def test_beta_negative(self):
         """β₁ < 0: volatility compresses liquidity changes"""
