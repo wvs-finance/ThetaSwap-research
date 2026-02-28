@@ -25,10 +25,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.Econometrics import (
     LiquidityState, LiquidityStateModel, beta, rho, state, result,
-    AdverseCompetition, delta_coeff, residual, ols_result
+    AdverseCompetition, AdverseCompetitionModel, delta_coeff, residual, ols_result
 )
 from data.DataHandler import (
-    PoolEntryData, delta, tvlUSD, priceUSD, div, lagged, txCount, normalize
+    PoolEntryData, delta, tvlUSD, priceUSD, div, lagged, txCount, normalize,
+    feesUSD, volumeUSD
 )
 from data.UniswapClient import UniswapClient, v3
 
@@ -193,6 +194,65 @@ class TestAdverseCompetitionAccessors(unittest.TestCase):
     def test_frozen(self):
         with self.assertRaises(AttributeError):
             self.ac._delta = 999
+
+
+class TestAdverseCompetition(unittest.TestCase):
+    """Test adverse competition hypothesis — Stage 2 of two-stage estimation.
+
+    Stage 1: ΔI_t extracted by LiquidityStateModel (congestion index)
+    Stage 2a: fee_yield ~ volume_ratio → η_t (fee yield orthogonal to LVR)
+    Stage 2b: η_t ~ ΔI_t → δ₂ (adverse competition impact)
+
+    Hypothesis:
+    - δ₂ < 0: congestion reduces fee capture quality (adverse competition)
+    - p < 0.05: statistically significant
+    - corr(η_t, volume/TVL) ≈ 0: residual is orthogonal to LVR
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        client = UniswapClient(v3())
+        pool = PoolEntryData(V3_USDC_WETH, client=client)
+        cls.pool_data = pool(pool.lifetimeLen())
+
+        # Stage 1: extract congestion index ΔI_t
+        endog = div(delta(tvlUSD(cls.pool_data)), lagged(tvlUSD(cls.pool_data)))
+        exog = _market_state(cls.pool_data)
+        ls = LiquidityStateModel()(endog=endog, exog=exog)
+
+        # Stage 2: adverse competition impact
+        cls.fee_yield = div(feesUSD(cls.pool_data), tvlUSD(cls.pool_data))
+        cls.volume_ratio = div(volumeUSD(cls.pool_data), tvlUSD(cls.pool_data))
+        cls.congestion = state(ls)
+        cls.ac = AdverseCompetitionModel()(
+            fee_yield=cls.fee_yield,
+            volume_ratio=cls.volume_ratio,
+            congestion=cls.congestion
+        )
+
+    def test_returns_adverse_competition(self):
+        self.assertIsInstance(self.ac, AdverseCompetition)
+
+    def test_delta_negative(self):
+        """δ₂ < 0: congestion reduces fee capture beyond what volume explains"""
+        self.assertLess(delta_coeff(self.ac), 0,
+            f"Expected δ₂ < 0 (adverse competition), got δ₂ = {delta_coeff(self.ac):.6f}")
+
+    def test_delta_significant(self):
+        """δ₂ significant at p < 0.05"""
+        res = ols_result(self.ac)
+        pval = res.pvalues.iloc[1]  # second coefficient is δ₂ (first is constant)
+        self.assertLess(pval, 0.05,
+            f"Expected p < 0.05 for δ₂, got p = {pval:.4f}")
+
+    def test_residual_orthogonal_to_volume(self):
+        """η_t is orthogonal to volume/TVL by construction"""
+        eta = residual(self.ac)
+        # Align indices
+        common = eta.index.intersection(self.volume_ratio.index)
+        corr = eta.loc[common].corr(self.volume_ratio.loc[common])
+        self.assertAlmostEqual(corr, 0, delta=0.05,
+            msg=f"Expected corr(η_t, volume/TVL) ≈ 0, got {corr:.4f}")
 
 
 if __name__ == "__main__":
