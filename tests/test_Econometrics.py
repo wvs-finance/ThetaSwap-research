@@ -23,7 +23,10 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data.Econometrics import LiquidityState, LiquidityStateModel, beta, rho, state, result
+from data.Econometrics import (
+    LiquidityState, LiquidityStateModel, beta, rho, state, result,
+    AdverseCompetition, delta_coeff, residual, ols_result
+)
 from data.DataHandler import (
     PoolEntryData, delta, tvlUSD, priceUSD, div, lagged, txCount, normalize
 )
@@ -163,6 +166,33 @@ class TestCongestionIndex(unittest.TestCase):
         s = state(self.ls)
         self.assertAlmostEqual(s.mean(), 0, delta=0.5,
             msg=f"Expected ΔI_t mean ≈ 0, got {s.mean():.4f}")
+
+
+class TestAdverseCompetitionAccessors(unittest.TestCase):
+    """Test AdverseCompetition dataclass and free function accessors"""
+
+    def setUp(self):
+        self.ac = AdverseCompetition(
+            _delta=-0.03,
+            _residual=pd.Series([0.1, -0.2, 0.05]),
+            _result="mock_ols"
+        )
+
+    def test_delta_returns_float(self):
+        self.assertIsInstance(delta_coeff(self.ac), float)
+
+    def test_delta_returns_value(self):
+        self.assertAlmostEqual(delta_coeff(self.ac), -0.03)
+
+    def test_residual_returns_series(self):
+        self.assertIsInstance(residual(self.ac), pd.Series)
+
+    def test_ols_result_returns_value(self):
+        self.assertEqual(ols_result(self.ac), "mock_ols")
+
+    def test_frozen(self):
+        with self.assertRaises(AttributeError):
+            self.ac._delta = 999
 
 
 if __name__ == "__main__":
