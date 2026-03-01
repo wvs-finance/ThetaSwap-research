@@ -1,4 +1,4 @@
 {
   "PoolEntryData._fetch_lifetime": "query GetPool($id: ID!) { pool(id: $id) { createdAtTimestamp } }",
-  "PoolEntryData.poolTimeSeries": "query GetPoolTimeSeries($id: ID!, $startDate: Int!, $first: Int!) { poolDayDatas(first: $first, orderBy: date, orderDirection: asc, where: { pool: $id, date_gt: $startDate }) { date tvlUSD volumeUSD feesUSD token0Price token1Price sqrtPrice txCount open high low close pool { liquidityProviderCount txCount collectedFeesUSD } } }"
+  "PoolEntryData.poolTimeSeries": "query GetPoolTimeSeries($id: ID!, $startDate: Int!, $first: Int!) { poolDayDatas(first: $first, orderBy: date, orderDirection: asc, where: { pool: $id, date_gt: $startDate }) { date tvlUSD volumeUSD feesUSD token0Price token1Price sqrtPrice txCount liquidity open high low close pool { liquidityProviderCount txCount collectedFeesUSD } } }"
 }

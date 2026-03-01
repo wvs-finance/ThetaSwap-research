@@ -110,7 +110,8 @@ class PoolEntryData:
              "token0Price": float(day.get("token0Price") or 0),
              "token1Price": float(day.get("token1Price") or 0),
              "sqrtPrice": float(day.get("sqrtPrice") or 0),
-             "txCount": int(day.get("txCount") or 0)
+             "txCount": int(day.get("txCount") or 0),
+             "liquidity": float(day.get("liquidity") or 0)
          }
          df = pd.DataFrame([to_row(day) for day in data]).set_index("date")
 
@@ -141,6 +142,10 @@ def priceUSD(poolData:pd.DataFrame) -> TimeSeries:
 def tvlUSD(poolData:pd.DataFrame) -> TimeSeries:
     """Get USD TVL time series."""
     return poolData["tvlUSD"]
+
+def liquidity(poolData: pd.DataFrame) -> TimeSeries:
+    """Get in-range liquidity time series (liquidity at active tick)."""
+    return poolData["liquidity"]
 
 def delta(series:TimeSeries) -> TimeSeries:
     diff = series.diff()
