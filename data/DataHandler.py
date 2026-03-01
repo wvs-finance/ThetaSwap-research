@@ -128,6 +128,16 @@ class PoolEntryData:
         pass
 
         
+def load_fee_compression(path: str = "data/fee_compression_sample.csv", interpolate: bool = True) -> TimeSeries:
+    """Load fee compression time series, optionally interpolate to daily."""
+    df = pd.read_csv(path, parse_dates=["date"], index_col="date")
+    series = pd.to_numeric(df["fee_compression"], errors="coerce")
+    if interpolate:
+        daily_idx = pd.date_range(series.index.min(), series.index.max(), freq="D")
+        series = series.reindex(daily_idx).interpolate(method="cubic")
+    return series
+
+
 def volumeUSD(poolData:pd.DataFrame) -> TimeSeries:
     """
     Get USD volume time series.
