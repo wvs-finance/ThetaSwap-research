@@ -43,7 +43,7 @@ AGGREGATE3_SIG = Web3.keccak(text="aggregate3((address,bool,bytes)[])")[:4]
 
 
 def multicall(calls, block_num, batch_size=200):
-    """Execute batched calls via Multicall3."""
+    """Execute batched calls via Multicall3 with retry on rate limits."""
     results = []
     for i in range(0, len(calls), batch_size):
         batch = calls[i:i + batch_size]
@@ -51,17 +51,26 @@ def multicall(calls, block_num, batch_size=200):
         multicall_data = AGGREGATE3_SIG + encode(
             ["(address,bool,bytes)[]"], [encoded_calls]
         )
-        try:
-            raw = w3.eth.call(
-                {"to": MULTICALL3, "data": multicall_data},
-                block_identifier=block_num
-            )
-            decoded = decode(["(bool,bytes)[]"], raw)[0]
-            results.extend(decoded)
-        except Exception as e:
+        success = False
+        for attempt in range(4):
+            try:
+                raw = w3.eth.call(
+                    {"to": MULTICALL3, "data": multicall_data},
+                    block_identifier=block_num
+                )
+                decoded = decode(["(bool,bytes)[]"], raw)[0]
+                results.extend(decoded)
+                success = True
+                break
+            except Exception as e:
+                if "429" in str(e) or "Too Many" in str(e):
+                    time.sleep(2.0 * (attempt + 1))
+                else:
+                    print(f"    Multicall batch failed: {e}", flush=True)
+                    break
+        if not success:
             results.extend([(False, b"")] * len(batch))
-            print(f"    Multicall batch failed: {e}", flush=True)
-        time.sleep(0.05)
+        time.sleep(0.1)  # 100ms between batches for Alchemy free tier
     return results
 
 
@@ -240,12 +249,10 @@ def compute_compression_at_block(block_num, positions):
     weighted_avg_fg0 = np.sum(fg_inside0_arr * liq_arr) / total_liquidity
     weighted_avg_fg1 = np.sum(fg_inside1_arr * liq_arr) / total_liquidity
 
-    # 6e: Fee compression
-    compression0 = (range_fg0 - int(weighted_avg_fg0)) % UINT256_MAX
-    compression1 = (range_fg1 - int(weighted_avg_fg1)) % UINT256_MAX
-
-    # Convert to float, denominate in token0 units using price
-    compression = float(compression0) / Q128 + float(compression1) * float(price_x128) / (Q128 * Q128)
+    # 6e: Fee compression (signed difference, computed in float to avoid modular wrap)
+    compression0 = (float(range_fg0) - weighted_avg_fg0) / Q128
+    compression1 = (float(range_fg1) - weighted_avg_fg1) * float(price_x128) / (Q128 * Q128)
+    compression = compression0 + compression1
 
     return compression, len(liq_list), p10_tick, p90_tick
 
