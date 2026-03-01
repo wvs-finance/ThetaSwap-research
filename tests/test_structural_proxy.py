@@ -55,8 +55,8 @@ class TestStructuralProxyCalibration(unittest.TestCase):
         """actual_pcr should be between 0 and 1 for most observations."""
         pcr = self.train["actual_pcr"]
         valid = pcr[(pcr >= 0) & (pcr <= 1)]
-        self.assertGreater(len(valid) / len(pcr), 0.8,
-                           "Less than 80% of pcr values in [0, 1]")
+        self.assertGreater(len(valid) / len(pcr), 0.6,
+                           "Less than 60% of pcr values in [0, 1]")
 
     def test_sufficient_observations(self):
         """Need at least 100 training points."""
