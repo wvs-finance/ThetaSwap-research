@@ -192,9 +192,9 @@ def compute_at_block(block_num, positions):
                 tick_fgo[t] = (td[2], td[3])
             except Exception as e:
                 print(f"    Failed to decode tick {t}: {e}", flush=True)
-                tick_fgo[t] = (0, 0)
+                return None  # abort this block — corrupted tick data
         else:
-            tick_fgo[t] = (0, 0)
+            return None  # abort this block — tick read failed
 
     # ------------------------------------------------------------------
     # Step 6: feeGrowthInside for implied range and reference position
