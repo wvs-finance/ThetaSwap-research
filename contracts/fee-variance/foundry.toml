@@ -4,6 +4,7 @@ out = "out"
 libs = ["lib"]
 evm_version = "shanghai"
 ffi = true
+via_ir = true
 
 [rpc_endpoints]
 mainnet = "${ETH_RPC_URL}"
