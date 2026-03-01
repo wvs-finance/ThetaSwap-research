@@ -9,7 +9,6 @@ Pre-Multicall3 blocks are skipped — they're slow and have few positions.
 Uses Multicall3 batching (~45s/day) → ~3 hours total.
 """
 import csv
-import json
 import os
 import time
 import numpy as np
@@ -172,7 +171,8 @@ def compute_compression_at_block(block_num, positions):
                     data
                 )
                 tick_fgo[t] = (td[2], td[3])
-            except Exception:
+            except Exception as e:
+                print(f"    Failed to decode tick {t}: {e}", flush=True)
                 tick_fgo[t] = (0, 0)
         else:
             tick_fgo[t] = (0, 0)
