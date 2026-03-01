@@ -152,10 +152,18 @@ def compute_at_block(block_num, positions):
 
     # ------------------------------------------------------------------
     # Step 3: Implied tick range — P10(tickLower), P90(tickUpper)
-    #         equal-weighted since we don't have per-block liquidity
+    #         Filter out full-range positions (tickLower=-887270 or tickUpper=887270)
+    #         before computing percentiles — they dominate and make range = full tick space
     # ------------------------------------------------------------------
-    tl_arr = np.array([tl for _, tl, _ in in_range])
-    tu_arr = np.array([tu for _, _, tu in in_range])
+    TICK_MIN, TICK_MAX = -887270, 887270
+    concentrated = [(tid, tl, tu) for tid, tl, tu in in_range
+                    if tl > TICK_MIN and tu < TICK_MAX]
+    if len(concentrated) < 2:
+        # Fall back to all positions if too few concentrated ones
+        concentrated = in_range
+
+    tl_arr = np.array([tl for _, tl, _ in concentrated])
+    tu_arr = np.array([tu for _, _, tu in concentrated])
 
     p10_tick = int(np.percentile(tl_arr, 10, method="lower"))
     p90_tick = int(np.percentile(tu_arr, 90, method="higher"))

@@ -138,6 +138,12 @@ def load_fee_compression(path: str = "data/fee_compression_sample.csv", interpol
     return series
 
 
+def load_fee_compression_daily(path: str = "data/fee_compression_daily.csv") -> TimeSeries:
+    """Load daily structural fee compression series (from structural_proxy.py output)."""
+    df = pd.read_csv(path, parse_dates=["date"], index_col="date")
+    return pd.to_numeric(df["fee_compression"], errors="coerce")
+
+
 def volumeUSD(poolData:pd.DataFrame) -> TimeSeries:
     """
     Get USD volume time series.
