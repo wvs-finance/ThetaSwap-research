@@ -1,0 +1,9 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+evm_version = "shanghai"
+ffi = true
+
+[rpc_endpoints]
+mainnet = "${ETH_RPC_URL}"
