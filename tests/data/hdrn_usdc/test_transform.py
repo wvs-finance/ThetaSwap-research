@@ -28,7 +28,10 @@ def _make_swap(
 def test_compute_pi_n_positive_fee_growth():
     prev = _make_swap(fg0=10 * Q128)
     curr = _make_swap(fg0=15 * Q128, pool_liquidity=10**18)
-    pi = compute_pi_n(curr, prev)
+    pi = compute_pi_n(
+        curr.fee_growth_global0_x128, curr.fee_growth_global1_x128,
+        prev.fee_growth_global0_x128, prev.fee_growth_global1_x128,
+    )
     assert pi > 0
 
 

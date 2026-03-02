@@ -1,4 +1,4 @@
-"""End-to-end pipeline: fetch HDRN/USDC swaps, filter, transform, save.
+"""End-to-end pipeline: fetch HDRN/USDC swaps + hourly data, join, filter, transform, save.
 
 Usage:
     python -m data.hdrn_usdc.pipeline
@@ -14,9 +14,10 @@ from typing import Final
 from data.UniswapClient import UniswapClient, v3
 from data.hdrn_usdc.types import HDRN_USDC_POOL
 from data.hdrn_usdc.fetch_swaps import fetch_all_swaps
+from data.hdrn_usdc.fetch_hourly import fetch_all_hourly
 from data.hdrn_usdc.persist import save_raw_swaps, load_raw_swaps, last_swap_id
 from data.hdrn_usdc.sampling import filter_active_period, ActivePeriod, describe_sample
-from data.hdrn_usdc.transform import to_observations
+from data.hdrn_usdc.transform import to_observations_with_hourly
 
 RAW_CSV: Final = "data/hdrn_usdc/raw_swaps.csv"
 OBS_CSV: Final = "data/hdrn_usdc/observations.csv"
@@ -54,15 +55,16 @@ def run(max_pages: int | None = None) -> None:
     """Execute the full pipeline."""
     os.makedirs("data/hdrn_usdc", exist_ok=True)
 
-    # Step 1: Fetch (with resume)
+    client = UniswapClient(v3())
+
+    # Step 1: Fetch swaps (with resume)
     resume_id = last_swap_id(RAW_CSV)
     if resume_id:
-        print(f"Resuming from swap {resume_id}")
+        print(f"Resuming swaps from {resume_id}")
         existing = load_raw_swaps(RAW_CSV)
     else:
         existing = ()
 
-    client = UniswapClient(v3())
     new_swaps = fetch_all_swaps(client, HDRN_USDC_POOL, start_id=resume_id, max_pages=max_pages)
 
     if new_swaps:
@@ -73,16 +75,21 @@ def run(max_pages: int | None = None) -> None:
 
     print(f"Total raw swaps: {len(all_swaps)}")
 
-    # Step 2: Sample (filter active period)
+    # Step 2: Fetch hourly snapshots (always full — cheap, ~30 pages)
+    print("Fetching PoolHourData...")
+    hourly = fetch_all_hourly(client, HDRN_USDC_POOL, max_pages=max_pages)
+    print(f"Total hourly snapshots: {len(hourly)}")
+
+    # Step 3: Sample (filter active period)
     sampled = filter_active_period(all_swaps, ActivePeriod(min_swaps_per_quarter=50))
     print(f"After active period filter: {len(sampled)} swaps")
     print(describe_sample(sampled))
 
-    # Step 3: Transform
-    observations = to_observations(sampled)
-    print(f"Observations (N-1): {len(observations)}")
+    # Step 4: Transform (swap + hourly join)
+    observations = to_observations_with_hourly(sampled, hourly)
+    print(f"Observations (after join): {len(observations)}")
 
-    # Step 4: Save observations
+    # Step 5: Save observations
     _save_observations(observations, OBS_CSV)
     print(f"Observations saved to {OBS_CSV}")
 
