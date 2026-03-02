@@ -105,9 +105,15 @@ def to_observations_with_hourly(
     """
     sorted_ts, by_ts = build_hourly_index(snapshots)
 
+    # CRITICAL: sort swaps by timestamp, not by ID (lexicographic hex).
+    # Subgraph keyset pagination returns id_gt ordering, which is NOT time order.
+    # Without this sort, consecutive swap deltas are between random time points,
+    # causing overflow artifacts in feeGrowthGlobal differences.
+    swaps_sorted = sorted(swaps, key=lambda s: s.timestamp)
+
     # Pre-compute hourly lookups for all swaps
     swap_hours: list[tuple[RawSwap, HourlySnapshot]] = []
-    for s in swaps:
+    for s in swaps_sorted:
         h = lookup_hourly(s.timestamp, sorted_ts, by_ts)
         if h is not None:
             swap_hours.append((s, h))
