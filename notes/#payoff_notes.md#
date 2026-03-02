@@ -1,0 +1,305 @@
+
+## Assumptions
+
+We have the on-chain value at each poiunt tin time and space on-chain of
+congestionIndexX<EVM_representation>
+
+
+## Token Design
+We have that if an lp wants to long this index to hedge his adverse competion risk. We from now define
+the claim
+
+====> 1 congestionToken = 1 unit of delta exposure to congestion index.  
+
+This is minting a claim (ERC6909 OR ERC1155) that promises the LP to have a portion of his wealth
+realized over time the payoff:
+
+- If we are isolating the fee adjusted returns of the LP positions, we only need to  consider the feesEarned per position and not the whole position value as this posirion value incorporates market risk componenets.
+
+- Fot this \Delta V = feeGrowthInside(position, beforeSwap) - feeGrowthInside(position, afterSwap)
+
+For the congestionToken, since it trackes linearly changes of congestion. To endogenize I_t we must define
+
+when does it change and update the stae variable acordingly. Recall \Delta I_t must reflect the changes
+of liquidity unexplainded by the market state. AT is core is a strucutral noise component of
+
+\Delta I_t = \Delta L_t - \mathbb{E} [\Delta L_t | \text{market state}]
+
+We need an on-chain traceable structural apporximation:
+\mathbb{E} [\Delta L_t | \text{market state}] = \mathbb{E} [\Delta L_t | \Delta P_t, \text{ticksCrossing}]                                       
+
+This rhs is A_t liquidity mechanically activated by price movement
+
+\Delta L_t on range, then:
+
+
+\Delta I_t = \Delta I_t - A_t
+
+### \Delta I_T UPDATE RUlE
+• addLiquidity
+• removeLiquidity
+• tick crossing
+• large swap
+--> I_{t+1} = I_t + \Delta I_t
+
+with \Delta I_t at each state-changing event. ==> congestionToken is event-driven.
+
+Under the invariant
+
+|\Delta I_t| <= \kappa \Delta L_t
+
+Instead of estimating κ statistically, define it structurally as the worst observed shock:
+
+𝜅
+=
+max
+⁡
+∣
+Δ
+𝐿
+𝑡
+𝐿
+𝑡
+−
+1
+∣
+κ=max
+	​
+
+L
+t−1
+	​
+
+ΔL
+t
+	​
+
+over rolling window W.
+
+Which is computable fully on-chain:
+
+R1:: Keep circular buffer
+R2:: Track rolling max
+
+
+## Convex Payoff 
+
+For LP hedging demand, we want:
+
+Price increasing in I
+> As more adverse competition. The price increases
+
+Convex in I
+
+Bounded to ensure solvency
+
+𝑝
+(
+𝐼
+)
+=
+𝜎
+(
+𝐼
+)
+p(I)=σ(I)
+
+Where:
+
+• σ increasing
+• bounded
+• convex
+
+
+
+Integrate:
+
+𝜙
+(
+𝐼
+)
+=
+∫
+𝑝
+(
+𝐼
+)
+𝑑
+𝐼
+ϕ(I)=∫p(I)dI
+
+
+
+
+
+
+## Hedge Ratio
+
+Then:
+hedgeRatio
+    =
+           feegrowthinside(position,beforeSwap) - feeGrowthInside(position, afterSwap)
+       ------------------------------------------------------------------------------------
+    metric(metric(congestionToken(position ,beforeSwap) - metric(congestionToken(position, afterSwap)
+
+N = hedgeRatio* Notional LP exposure
+
+
+
+This ensures:
+
+Δ
+LP fees
++
+Δ
+congestion payoff
+≈
+0
+ΔLP fees+Δcongestion payoff≈0
+
+That’s the hedge.
+
+## Margin
+
+Because LP share value decreases when congestion rises. Use LP token itself as margin.
+Now Make Margin a Function of Pool State
+
+M >= sup_{\Delta I \in S} N \Delta I
+
+So margin rule becomes:
+
+𝑀
+≥
+𝑁
+⋅
+𝐼
+𝑚
+𝑎
+𝑥
+M≥N⋅I
+max
+	​
+
+
+But since I_t can grow, you must:
+
+Either cap x
+Or periodically reset index
+
+Otherwise exposure accumulates.
+
+This is critical.
+
+Sigmoid caps marginal price, not total exposure.
+
+So you must combine with:
+
+• Rolling index window
+or
+• Mean-reverting definition of I
+
+Otherwise cumulative drift creates unbounded payoff.
+
+
+- LP deposits LP token
+- Protocol mints congestionToken against it
+- Position auto-liquidates if:
+
+----------------------------->  LP value<congestion payoff <-------------------------------
+
+
+
+## Trading Function
+
+Recall that if the payoff is monotonic, there is a uniquer trading function asociutaed wioth it. Thus this givs is the CFMM
+
+
+
+
+Price definition:
+
+𝑝
+(
+𝑥
+)
+=
+𝑑
+𝑦
+𝑑
+𝑥
+p(x)=
+dx
+dy
+	​
+
+
+So:
+
+𝑑
+𝑦
+𝑑
+𝑥
+=
+1
+1
++
+𝑒
+−
+𝑥
+/
+𝜆
+dx
+dy
+	​
+
+=
+1+e
+−x/λ
+1
+	​
+
+
+Integrate:
+
+𝑦
+(
+𝑥
+)
+=
+𝜆
+ln
+⁡
+(
+1
++
+𝑒
+𝑥
+/
+𝜆
+)
++
+𝑘
+y(x)=λln(1+e
+x/λ
+)+k
+
+So the invariant is:
+
+𝑦
+−
+𝜆
+ln
+⁡
+(
+1
++
+𝑒
+𝑥
+/
+𝜆
+)
+=
+𝑘
+y−λln(1+e
+x/λ
+)=k

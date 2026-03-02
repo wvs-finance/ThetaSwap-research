@@ -1,14 +1,12 @@
 """
-Compute Fee Compression metric on a sampled subset of days for model validation.
-
-Fee compression = feeGrowthInside(implied range) - weighted_avg(feeGrowthInside(position_i))
-where the implied range is [P10_tickLower, P90_tickUpper] liquidity-weighted.
+Compute FeeVarianceX128 on a sampled subset of days for model validation.
 
 Strategy: Every 7th day from Multicall3 deployment onward (~210 samples).
 Pre-Multicall3 blocks are skipped — they're slow and have few positions.
 Uses Multicall3 batching (~45s/day) → ~3 hours total.
 """
 import csv
+import json
 import os
 import time
 import numpy as np
@@ -18,7 +16,7 @@ from eth_abi import encode, decode
 RPC_URL = "https://eth-mainnet.g.alchemy.com/v2/fd_m2oikp78msnnQGxO6H"
 DAILY_BLOCKS_PATH = "data/daily_blocks.csv"
 POSITION_REGISTRY_PATH = "data/position_registry.csv"
-OUTPUT_PATH = "data/fee_compression_sample.csv"
+OUTPUT_PATH = "data/fee_variance_sample.csv"
 
 NPM_ADDRESS = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
 POOL_ADDRESS = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
@@ -43,7 +41,7 @@ AGGREGATE3_SIG = Web3.keccak(text="aggregate3((address,bool,bytes)[])")[:4]
 
 
 def multicall(calls, block_num, batch_size=200):
-    """Execute batched calls via Multicall3 with retry on rate limits."""
+    """Execute batched calls via Multicall3."""
     results = []
     for i in range(0, len(calls), batch_size):
         batch = calls[i:i + batch_size]
@@ -51,26 +49,17 @@ def multicall(calls, block_num, batch_size=200):
         multicall_data = AGGREGATE3_SIG + encode(
             ["(address,bool,bytes)[]"], [encoded_calls]
         )
-        success = False
-        for attempt in range(4):
-            try:
-                raw = w3.eth.call(
-                    {"to": MULTICALL3, "data": multicall_data},
-                    block_identifier=block_num
-                )
-                decoded = decode(["(bool,bytes)[]"], raw)[0]
-                results.extend(decoded)
-                success = True
-                break
-            except Exception as e:
-                if "429" in str(e) or "Too Many" in str(e):
-                    time.sleep(2.0 * (attempt + 1))
-                else:
-                    print(f"    Multicall batch failed: {e}", flush=True)
-                    break
-        if not success:
+        try:
+            raw = w3.eth.call(
+                {"to": MULTICALL3, "data": multicall_data},
+                block_identifier=block_num
+            )
+            decoded = decode(["(bool,bytes)[]"], raw)[0]
+            results.extend(decoded)
+        except Exception as e:
             results.extend([(False, b"")] * len(batch))
-        time.sleep(0.1)  # 100ms between batches for Alchemy free tier
+            print(f"    Multicall batch failed: {e}", flush=True)
+        time.sleep(0.05)
     return results
 
 
@@ -85,19 +74,8 @@ def load_positions():
                 for r in csv.DictReader(f)]
 
 
-def liquidity_weighted_percentile(values, weights, percentile):
-    """Compute liquidity-weighted percentile."""
-    sorted_indices = np.argsort(values)
-    sorted_values = values[sorted_indices]
-    sorted_weights = weights[sorted_indices]
-    cum_weights = np.cumsum(sorted_weights) / sorted_weights.sum()
-    idx = np.searchsorted(cum_weights, percentile / 100.0)
-    idx = min(idx, len(sorted_values) - 1)
-    return int(sorted_values[idx])
-
-
-def compute_compression_at_block(block_num, positions):
-    """Compute fee compression metric at a specific block using Multicall3."""
+def compute_variance_at_block(block_num, positions):
+    """Compute FeeVarianceX128 at a specific block using Multicall3."""
 
     # Step 1: Pool state
     pool_calls = [
@@ -109,7 +87,7 @@ def compute_compression_at_block(block_num, positions):
 
     for pr in pool_results:
         if not pr[0] or len(pr[1]) < 32:
-            return 0, 0, 0, 0
+            return 0, 0
 
     slot0_data = decode(
         ["uint160", "int24", "uint16", "uint16", "uint16", "uint8", "bool"],
@@ -127,7 +105,7 @@ def compute_compression_at_block(block_num, positions):
                 if tl <= tick_current < tu]
 
     if len(in_range) < 2:
-        return 0, len(in_range), 0, 0
+        return 0, len(in_range)
 
     # Step 3: Batch-read position data
     pos_calls = [
@@ -160,7 +138,7 @@ def compute_compression_at_block(block_num, positions):
             continue
 
     if len(active_positions) < 2:
-        return 0, len(active_positions), 0, 0
+        return 0, len(active_positions)
 
     # Step 5: Batch-read tick data
     tick_list = sorted(ticks_needed)
@@ -180,20 +158,14 @@ def compute_compression_at_block(block_num, positions):
                     data
                 )
                 tick_fgo[t] = (td[2], td[3])
-            except Exception as e:
-                print(f"    Failed to decode tick {t}: {e}", flush=True)
+            except Exception:
                 tick_fgo[t] = (0, 0)
         else:
             tick_fgo[t] = (0, 0)
 
-    # Step 6: Compute fee compression metric
-
-    # 6a: Per-position feeGrowthInside from tick data
-    fg_inside0_list = []
-    fg_inside1_list = []
+    # Step 6: Compute per-position fees and variance
+    fees_list = []
     liq_list = []
-    tl_list = []
-    tu_list = []
 
     for tid, tl, tu, liq, fg_inside0_last, fg_inside1_last, owed0, owed1 in active_positions:
         lower_fgo0, lower_fgo1 = tick_fgo.get(tl, (0, 0))
@@ -209,57 +181,29 @@ def compute_compression_at_block(block_num, positions):
             fg_inside0 = (upper_fgo0 - lower_fgo0) % UINT256_MAX
             fg_inside1 = (upper_fgo1 - lower_fgo1) % UINT256_MAX
 
-        fg_inside0_list.append(fg_inside0)
-        fg_inside1_list.append(fg_inside1)
-        liq_list.append(liq)
-        tl_list.append(tl)
-        tu_list.append(tu)
+        fees0 = ((fg_inside0 - fg_inside0_last) % UINT256_MAX) * liq // Q128 + owed0
+        fees1 = ((fg_inside1 - fg_inside1_last) % UINT256_MAX) * liq // Q128 + owed1
 
-    if len(liq_list) < 2:
-        return 0, len(liq_list), 0, 0
+        fees_usd = float(fees0) * Q128 + float(fees1) * float(price_x128)
 
-    liq_arr = np.array(liq_list, dtype=np.float64)
-    total_liquidity = liq_arr.sum()
+        if fees_usd > 0:
+            fees_list.append(fees_usd)
+            liq_list.append(float(liq))
 
-    # 6b: Implied tick range [P10_tickLower, P90_tickUpper] liquidity-weighted
-    tl_arr = np.array(tl_list)
-    tu_arr = np.array(tu_list)
+    if len(fees_list) < 2:
+        return 0, len(fees_list)
 
-    p10_tick = liquidity_weighted_percentile(tl_arr, liq_arr, 10)
-    p90_tick = liquidity_weighted_percentile(tu_arr, liq_arr, 90)
+    fees_arr = np.array(fees_list)
+    liq_arr = np.array(liq_list)
 
-    # 6c: feeGrowthInside for the implied range
-    p10_fgo0, p10_fgo1 = tick_fgo.get(p10_tick, (0, 0))
-    p90_fgo0, p90_fgo1 = tick_fgo.get(p90_tick, (0, 0))
+    fee_share = fees_arr / fees_arr.sum()
+    liq_share = liq_arr / liq_arr.sum()
+    c = fee_share - liq_share
 
-    if tick_current < p10_tick:
-        range_fg0 = (p10_fgo0 - p90_fgo0) % UINT256_MAX
-        range_fg1 = (p10_fgo1 - p90_fgo1) % UINT256_MAX
-    elif tick_current < p90_tick:
-        range_fg0 = (fg_global0 - p10_fgo0 - p90_fgo0) % UINT256_MAX
-        range_fg1 = (fg_global1 - p10_fgo1 - p90_fgo1) % UINT256_MAX
-    else:
-        range_fg0 = (p90_fgo0 - p10_fgo0) % UINT256_MAX
-        range_fg1 = (p90_fgo1 - p10_fgo1) % UINT256_MAX
+    variance = float(np.mean(c**2))
+    variance_x128 = int(variance * Q128)
 
-    # 6d: Liquidity-weighted average of per-position feeGrowthInside
-    # Use Python arbitrary-precision ints to avoid float64 precision loss
-    # (feeGrowthInside values can be up to 2^256, float64 only has 53-bit mantissa)
-    total_liq_int = sum(liq_list)
-    weighted_sum_fg0 = sum(fg * liq for fg, liq in zip(fg_inside0_list, liq_list))
-    weighted_sum_fg1 = sum(fg * liq for fg, liq in zip(fg_inside1_list, liq_list))
-
-    # 6e: Fee compression as signed rational in Q128
-    # compression = (range_fg * total_liq - weighted_sum_fg) / (total_liq * Q128)
-    diff0 = range_fg0 * total_liq_int - weighted_sum_fg0
-    diff1 = range_fg1 * total_liq_int - weighted_sum_fg1
-
-    # Convert to float, denominate in token0 units
-    compression0 = float(diff0) / (float(total_liq_int) * Q128)
-    compression1 = float(diff1) * float(price_x128) / (float(total_liq_int) * Q128 * Q128)
-    compression = compression0 + compression1
-
-    return compression, len(liq_list), p10_tick, p90_tick
+    return variance_x128, len(fees_list)
 
 
 def main():
@@ -281,10 +225,10 @@ def main():
         print(f"Resuming: {len(completed_dates)} days already computed", flush=True)
 
     remaining = [(d, b) for d, b in sampled if d not in completed_dates]
-    print(f"Computing fee compression for {len(remaining)} remaining days", flush=True)
+    print(f"Computing fee variance for {len(remaining)} remaining days", flush=True)
 
     mode = "a" if completed_dates else "w"
-    fieldnames = ["date", "block_number", "fee_compression", "num_positions", "p10_tick", "p90_tick"]
+    fieldnames = ["date", "block_number", "fee_variance_x128", "num_positions"]
     with open(OUTPUT_PATH, mode, newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         if not completed_dates:
@@ -293,15 +237,13 @@ def main():
         for i, (date, block) in enumerate(remaining):
             t0 = time.time()
             try:
-                compression, num_pos, p10_tick, p90_tick = compute_compression_at_block(block, positions)
+                variance, num_pos = compute_variance_at_block(block, positions)
                 elapsed = time.time() - t0
                 row = {
                     "date": date,
                     "block_number": block,
-                    "fee_compression": compression,
+                    "fee_variance_x128": variance,
                     "num_positions": num_pos,
-                    "p10_tick": p10_tick,
-                    "p90_tick": p90_tick,
                 }
                 writer.writerow(row)
                 f.flush()
@@ -310,16 +252,14 @@ def main():
                     remaining_days = len(remaining) - i - 1
                     eta_hours = elapsed * remaining_days / 3600
                     print(f"  [{i+1}/{len(remaining)}] {date} "
-                          f"compression={compression:.6f} pos={num_pos} "
-                          f"p10={p10_tick} p90={p90_tick} "
+                          f"variance={variance} pos={num_pos} "
                           f"time={elapsed:.1f}s ETA={eta_hours:.1f}h", flush=True)
 
             except Exception as e:
                 print(f"  ERROR {date} block={block}: {e}", flush=True)
                 writer.writerow({
                     "date": date, "block_number": block,
-                    "fee_compression": 0, "num_positions": 0,
-                    "p10_tick": 0, "p90_tick": 0,
+                    "fee_variance_x128": 0, "num_positions": 0,
                 })
                 f.flush()
 

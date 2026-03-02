@@ -3,10 +3,12 @@ Compute daily FeeVarianceX128 — cross-sectional variance of (fee_share - liq_s
 across active NPM positions on V3 USDC/WETH pool.
 
 Uses Multicall3 to batch RPC calls (~100x faster than individual calls).
+For pre-Multicall3 blocks (<14,353,601), uses individual eth_call with sampling.
 """
 import csv
 import json
 import os
+import random
 import time
 import numpy as np
 from web3 import Web3
@@ -20,6 +22,8 @@ OUTPUT_PATH = "data/fee_variance.csv"
 NPM_ADDRESS = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
 POOL_ADDRESS = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
 MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11"
+MULTICALL3_DEPLOY_BLOCK = 14_353_601
+TOTAL_SUPPLY_SIG = Web3.keccak(text="totalSupply()")[:4]
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={"timeout": 120}))
 
@@ -38,11 +42,41 @@ FEE_GROWTH1_SIG = Web3.keccak(text="feeGrowthGlobal1X128()")[:4]
 AGGREGATE3_SIG = Web3.keccak(text="aggregate3((address,bool,bytes)[])")[:4]
 
 
-def multicall(calls, block_num, batch_size=200):
-    """Execute batched calls via Multicall3.
+def individual_calls(calls, block_num):
+    """Execute calls sequentially via eth_call with retry (pre-Multicall3 fallback).
     calls: list of (target_address, calldata)
     Returns: list of (success, return_data)
     """
+    results = []
+    for target, calldata in calls:
+        success = False
+        raw = b""
+        for attempt in range(4):
+            try:
+                raw = w3.eth.call(
+                    {"to": Web3.to_checksum_address(target), "data": calldata},
+                    block_identifier=block_num
+                )
+                success = True
+                break
+            except Exception as e:
+                if "429" in str(e) or "Too Many" in str(e):
+                    time.sleep(2.0 * (attempt + 1))
+                else:
+                    break
+        results.append((success, raw))
+        time.sleep(0.06)  # ~16 calls/sec → ~416 CU/s (under 500 CUPs limit)
+    return results
+
+
+def multicall(calls, block_num, batch_size=200):
+    """Execute batched calls via Multicall3, or individual calls for old blocks.
+    calls: list of (target_address, calldata)
+    Returns: list of (success, return_data)
+    """
+    if block_num < MULTICALL3_DEPLOY_BLOCK:
+        return individual_calls(calls, block_num)
+
     results = []
     for i in range(0, len(calls), batch_size):
         batch = calls[i:i + batch_size]
@@ -91,6 +125,9 @@ def load_positions():
                 for r in csv.DictReader(f)]
 
 
+MAX_INDIVIDUAL_POSITIONS = 200  # sample size for pre-Multicall3 blocks
+
+
 def compute_variance_at_block(block_num, positions):
     """Compute FeeVarianceX128 at a specific block using multicall."""
 
@@ -102,8 +139,11 @@ def compute_variance_at_block(block_num, positions):
     ]
     pool_results = multicall(pool_calls, block_num, batch_size=10)
 
-    if not pool_results[0][0]:
-        return 0, 0
+    # Validate all pool state calls succeeded with data
+    method = "individual" if block_num < MULTICALL3_DEPLOY_BLOCK else "multicall"
+    for pr in pool_results:
+        if not pr[0] or len(pr[1]) < 32:
+            return 0, 0, method
 
     slot0_data = decode(
         ["uint160", "int24", "uint16", "uint16", "uint16", "uint8", "bool"],
@@ -121,7 +161,23 @@ def compute_variance_at_block(block_num, positions):
                 if tl <= tick_current < tu]
 
     if len(in_range) < 2:
-        return 0, len(in_range)
+        return 0, len(in_range), method
+
+    # For pre-Multicall3 blocks, filter by tokenIds that existed at that block
+    if block_num < MULTICALL3_DEPLOY_BLOCK:
+        try:
+            raw_ts = w3.eth.call(
+                {"to": NPM_ADDRESS, "data": TOTAL_SUPPLY_SIG},
+                block_identifier=block_num
+            )
+            max_token_id = decode(["uint256"], raw_ts)[0]
+            in_range = [(tid, tl, tu) for tid, tl, tu in in_range if tid <= max_token_id]
+        except Exception:
+            pass  # fall through with full list if totalSupply call fails
+        # If still too many, sample
+        if len(in_range) > MAX_INDIVIDUAL_POSITIONS:
+            random.seed(block_num)
+            in_range = random.sample(in_range, MAX_INDIVIDUAL_POSITIONS)
 
     # Step 3: Batch-read all position data via multicall
     pos_calls = [
@@ -154,7 +210,7 @@ def compute_variance_at_block(block_num, positions):
             continue
 
     if len(active_positions) < 2:
-        return 0, len(active_positions)
+        return 0, len(active_positions), method
 
     # Step 5: Batch-read tick data
     tick_list = sorted(ticks_needed)
@@ -210,7 +266,7 @@ def compute_variance_at_block(block_num, positions):
             liq_list.append(float(liq))
 
     if len(fees_list) < 2:
-        return 0, len(fees_list)
+        return 0, len(fees_list), method
 
     # Compute variance of (fee_share - liq_share)
     fees_arr = np.array(fees_list)
@@ -223,7 +279,7 @@ def compute_variance_at_block(block_num, positions):
     variance = float(np.mean(c**2))
     variance_x128 = int(variance * Q128)
 
-    return variance_x128, len(fees_list)
+    return variance_x128, len(fees_list), method
 
 
 def main():
@@ -244,23 +300,23 @@ def main():
     print(f"Computing fee variance for {len(remaining)} remaining days", flush=True)
 
     mode = "a" if completed_dates else "w"
+    fieldnames = ["date", "block_number", "fee_variance_x128", "num_positions", "method"]
     with open(OUTPUT_PATH, mode, newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "date", "block_number", "fee_variance_x128", "num_positions"
-        ])
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         if not completed_dates:
             writer.writeheader()
 
         for i, (date, block) in enumerate(remaining):
             t0 = time.time()
             try:
-                variance, num_pos = compute_variance_at_block(block, positions)
+                variance, num_pos, method = compute_variance_at_block(block, positions)
                 elapsed = time.time() - t0
                 row = {
                     "date": date,
                     "block_number": block,
                     "fee_variance_x128": variance,
                     "num_positions": num_pos,
+                    "method": method,
                 }
                 writer.writerow(row)
                 f.flush()
@@ -270,13 +326,16 @@ def main():
                     eta_hours = elapsed * remaining_days / 3600
                     print(f"  [{i+1}/{len(remaining)}] {date} "
                           f"variance={variance} pos={num_pos} "
-                          f"time={elapsed:.1f}s ETA={eta_hours:.1f}h", flush=True)
+                          f"method={method} time={elapsed:.1f}s "
+                          f"ETA={eta_hours:.1f}h", flush=True)
 
             except Exception as e:
                 print(f"  ERROR {date} block={block}: {e}", flush=True)
+                method = "individual" if block < MULTICALL3_DEPLOY_BLOCK else "multicall"
                 writer.writerow({
                     "date": date, "block_number": block,
                     "fee_variance_x128": 0, "num_positions": 0,
+                    "method": method,
                 })
                 f.flush()
 

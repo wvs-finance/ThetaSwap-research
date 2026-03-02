@@ -72,7 +72,6 @@ Assume we prove or show the above or show the conditions, uner which the equalit
 
 ### **Architecture Overview:**
 
-
 ```
 ┌─────────────────────────────────────────────────────────┐
 │              Competition Swap Protocol               │

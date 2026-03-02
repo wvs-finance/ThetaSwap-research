@@ -1,0 +1,113 @@
+--- a/data/DataHandler.py
++++ b/data/DataHandler.py
+@@ -60,6 +60,32 @@ class PoolDataEntry:
+         endDate: Timestamp = int(dt.datetime.now().timestamp())
+         return self.__toTimeRange(createdAt, endDate)
+ 
++    def poolTimeSeries(self, first: int = 1000) -> pd.DataFrame:
++        """
++        Fetch daily pool time series for the pool's lifetime.
++        
++        Args:
++            first: Number of daily data points to fetch (default: 1000)
++            
++        Returns:
++            DataFrame with columns:
++            - date, tvlUSD, volumeUSD, feesUSD
++            - token0Price, token1Price, sqrtPrice
++            - txCount, open, high, low, close
++            - pool_lpCount, pool_txCount, pool_collectedFeesUSD
++        """
++        queryParams: QueryParams = self.__loadQueries("PoolDataEntry.poolTimeSeries")
++        result: QueryResult = self.v4.query(
++            query(queryParams),
++            {
++                **args(queryParams),
++                "id": self.pool_id.lower(),
++                "startDate": self.lifetime[0],
++                "first": first
++            }
++        )
++        return self._toTimeSeriesDataFrame(result)
++
+     def activePositions(self) -> TimeSeries:
+         """Get active positions time series."""
+         pass
+@@ -94,8 +120,76 @@ class PoolDataEntry:
+         ts: Timestamp = int(pool.get("createdAtTimestamp", 0))
+         return ts
+ 
++    @staticmethod
++    def days_between(start_ts: Timestamp, end_ts: Timestamp) -> int:
++        """
++        Calculate number of days between two timestamps.
++        
++        Args:
++            start_ts: Start timestamp (Unix seconds)
++            end_ts: End timestamp (Unix seconds)
++            
++        Returns:
++            Number of days (integer)
++        """
++        return (end_ts - start_ts) // 86400
++
++    def days_in_lifetime(self) -> int:
++        """
++        Get number of days in pool's lifetime.
++        
++        Returns:
+  +            Number of days from pool creation to now
++        """
++        return self.days_between(self.lifetime[0], self.lifetime[1])
++
+     def _toTimeSeries(self, res: QueryResult) -> TimeSeries:
+         """Convert query result to pandas TimeSeries."""
+         pass
+ 
++    def _toTimeSeriesDataFrame(self, res: QueryResult) -> pd.DataFrame:
++        """
++        Convert poolDayDatas query result to pandas DataFrame.
++        
++        Args:
++            res: Query result with 'poolDayDatas' key
++            
++        Returns:
++            DataFrame with daily pool metrics
++        """
++        data: List[Dict[str, Any]] = res.get("poolDayDatas", [])
++        
++        if not data:
++            return pd.DataFrame()
++        
++        # Flatten nested pool fields
++        rows = []
++        for day in data:
++            pool_data = day.get("pool", {})
++            row = {
++                "date": day.get("date"),
++                "tvlUSD": float(day.get("tvlUSD") or 0),
++                "volumeUSD": float(day.get("volumeUSD") or 0),
++                "feesUSD": float(day.get("feesUSD") or 0),
++                "token0Price": float(day.get("token0Price") or 0),
++                "token1Price": float(day.get("token1Price") or 0),
++                "sqrtPrice": float(day.get("sqrtPrice") or 0),
++                "txCount": int(day.get("txCount") or 0),
++                "open": float(day.get("open") or 0),
++                "high": float(day.get("high") or 0),
++                "low": float(day.get("low") or 0),
++                "close": float(day.get("close") or 0),
++                "pool_lpCount": int(pool_data.get("liquidityProviderCount") or 0),
++                "pool_txCount": int(pool_data.get("txCount") or 0),
++                "pool_collectedFeesUSD": float(pool_data.get("collectedFeesUSD") or 0)
++            }
++            rows.append(row)
++        
++        df = pd.DataFrame(rows)
++        
++        # Convert date to datetime index
++        if "date" in df.columns:
++            df["date"] = pd.to_datetime(df["date"], unit="s")
++            df = df.set_index("date")
++        
++        return df
+ 

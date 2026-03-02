@@ -1,0 +1,109 @@
+--- a/data/DataHandler.py
++++ b/data/DataHandler.py
+@@ -119,48 +119,66 @@ def _toTimeSeries(self, res: QueryResult) -> TimeSeries:
+         pass
+ 
+ 
++## This function takes the data frame gotten from calling the poolData = PoolDataEntry() instance
++## and making the poolData() call
++
+ def volumeUSD(poolData:pd.DataFrame) -> TimeSeries:
+     """
+     Get USD volume time series.
+     It must return the volumeUSD column only
+     """
+     return poolData["volumeUSD"]
+ 
++
++## Same as above but for price
+ def priceUSD(poolData:pd.DataFrame) -> TimeSeries:
+     """Get USD price time series."""
+     return poolData["token0Price"]
++
++
++## Same as above but for TVL
+ 
+ def tvlUSD(poolData:pd.DataFrame) -> TimeSeries:
+     """Get USD TVL time series."""
+     return poolData["tvlUSD"]
+ 
++
++## Wraps the pd.diff or methods used for getting teh time series that
++## calcultes L_{t+1} - L_{t}, it places on the first cell the average
+ 
+ def delta(series:TimeSeries) -> TimeSeries:
++    """
++    Wraps pd.diff to calculate L_{t+1} - L_{t} for a time series.
++    Places the average of the series in the first cell.
++    """
+     diff = series.diff()
+     return diff.fillna({diff.index[0]: series.mean()})
+ 
+ 
++## Wraps the function from pandas to get the time series from the
++## division of the values at each timestamp
++
+ def div(numerator: TimeSeries, denominator: TimeSeries) -> TimeSeries:
++    """
++    Wraps element-wise division of two time series at each timestamp.
++    """
+     return numerator / denominator
+ 
+ 
++## Wraps the forward looking feature meaning
++## reference value_{t+1} instead of value_t on a time series
++
+ def forward(series: TimeSeries) -> TimeSeries:
++    """
++    Wraps forward looking feature - references value_{t+1} instead of value_t.
++    """
+     return series.shift(-1)
+ 
+ def lagged(series: TimeSeries) -> TimeSeries:
++    """
++    Wraps lagged feature - references value_{t-1} instead of value_t.
++    """
+     return series.shift(1)
+ 
++
++## Wraps a variance method from a library on a time Series
++## There is a deafulty library if not specified uyses strategy patter to look for the
++## class or function
++
++
++## This MUST not be a float since at each time stamp ther is a cummulated variance value
++## Thus this fucntion inded returns a timeSeries
++
+ def variance(series: TimeSeries, libraryPointer:Optional[str]) -> TimeSeries:
++    """
++    Wraps a variance method from a library on a time series.
++    Returns cumulative variance at each timestamp (TimeSeries), not a single float.
++    Uses strategy pattern to look for the class or function.
++    """
+     strategy = VarianceStrategy()
+     return strategy(series, libraryPointer)
+ 
+ class VarianceStrategy:
+-    def __call__(self, libraryPointer: Optional[str]):
+-        if
++    """Strategy pattern for variance calculation."""
++    
++    def __call__(self, series: TimeSeries, libraryPointer: Optional[str] = None) -> TimeSeries:
++        """
++        Calculate cumulative variance at each timestamp.
++        
++        Args:
++            series: Input time series
++            libraryPointer: Library to use ("numpy", "pandas", or None for default)
++            
++        Returns:
++            TimeSeries with cumulative variance at each timestamp
++        """
++        if libraryPointer is None or libraryPointer == "pandas":
++            return series.expanding().var()
++        elif libraryPointer == "numpy":
++            import numpy as np
++            return pd.Series([np.var(series.iloc[:i+1].values) for i in range(len(series))], 
++                           index=series.index)
++        else:
++            return series.expanding().var()
