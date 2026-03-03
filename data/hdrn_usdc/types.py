@@ -39,6 +39,15 @@ class RawSwap:
 
 
 @dataclass(frozen=True)
+class BlockState:
+    """Pool state at a specific block from RPC."""
+    block_number: BlockNumber
+    liquidity: Liquidity
+    fee_growth_global0_x128: FeeGrowthX128
+    fee_growth_global1_x128: FeeGrowthX128
+
+
+@dataclass(frozen=True)
 class SwapObservation:
     """Computed swap-level observation for the regression."""
     swap_id: SwapId

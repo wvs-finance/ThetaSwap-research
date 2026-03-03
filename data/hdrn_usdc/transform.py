@@ -15,7 +15,8 @@ from typing import Sequence
 
 from data.hdrn_usdc.fetch_hourly import HourlySnapshot
 from data.hdrn_usdc.types import (
-    RawSwap, SwapObservation, FeeGrowthX128, Liquidity, Timestamp, Q128,
+    BlockNumber, BlockState, RawSwap, SwapObservation,
+    FeeGrowthX128, Liquidity, Timestamp, Q128,
 )
 
 GWEI: float = 1e9
@@ -174,4 +175,50 @@ def to_observations(swaps: Sequence[RawSwap]) -> tuple[SwapObservation, ...]:
             fee_growth0=curr.fee_growth_global0_x128,
             fee_growth1=curr.fee_growth_global1_x128,
         ))
+    return tuple(observations)
+
+
+def to_observations_block_level(
+    swaps: Sequence[RawSwap],
+    block_states: dict[BlockNumber, BlockState],
+) -> tuple[SwapObservation, ...]:
+    """Join swap-level data with exact block-level RPC state.
+
+    Unlike the hourly join, each swap is matched to its own block's state
+    via O(1) dict lookup — no hourly floor, no bisect.
+
+    Swaps without a matching block state are dropped.
+    First swap consumed as baseline (N-1 observations from N matched swaps).
+    """
+    swaps_sorted = sorted(swaps, key=lambda s: s.timestamp)
+
+    # Filter to swaps with matching block state
+    matched: list[tuple[RawSwap, BlockState]] = [
+        (s, block_states[s.block_number])
+        for s in swaps_sorted
+        if s.block_number in block_states
+    ]
+
+    observations: list[SwapObservation] = [
+        SwapObservation(
+            swap_id=curr_swap.id,
+            timestamp=curr_swap.timestamp,
+            block_number=curr_swap.block_number,
+            pi_n=compute_pi_n(
+                curr_bs.fee_growth_global0_x128, curr_bs.fee_growth_global1_x128,
+                prev_bs.fee_growth_global0_x128, prev_bs.fee_growth_global1_x128,
+            ),
+            l_active_n=float(curr_bs.liquidity),
+            dlog_l_n=_dlog_l(curr_bs.liquidity, prev_bs.liquidity),
+            volume_n=abs(curr_swap.amount_usd),
+            gas_n=curr_swap.gas_price / GWEI,
+            dp_n=_dp(curr_swap.sqrt_price_x96, prev_swap.sqrt_price_x96),
+            tick_n=curr_swap.tick,
+            fee_growth0=curr_bs.fee_growth_global0_x128,
+            fee_growth1=curr_bs.fee_growth_global1_x128,
+        )
+        for (prev_swap, prev_bs), (curr_swap, curr_bs)
+        in zip(matched[:-1], matched[1:])
+    ]
+
     return tuple(observations)
